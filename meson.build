@@ -1,4 +1,14 @@
-project('vkquake', 'c', default_options : ['c_std=gnu11', 'buildtype=release', 'strip=false', 'debug=true'])
+project(
+    'vkquake',
+    'c',
+    default_options : [
+        'c_std=gnu11',
+        'buildtype=release',
+#        'strip=false',
+#        'debug=true',
+        'optimization=3'
+    ]
+)
 
 cc = meson.get_compiler('c')
 
@@ -208,15 +218,7 @@ deps = [
     sdl_dep,
 ]
 
-if build_machine.system() == 'darwin'
-    molten_dirs = []
-    if import('fs').exists('/opt/homebrew/lib/libMoltenVK.dylib')
-        molten_dirs += '/opt/homebrew/lib'
-    endif
-    deps += cc.find_library('MoltenVK', required : true, dirs : molten_dirs)
-else
-    deps += dependency('vulkan')
-endif
+deps += dependency('vulkan')
 
 if get_option('use_codec_wave').enabled()
     cflags += '-DUSE_CODEC_WAVE'
@@ -283,4 +285,11 @@ incdirs = [
     'Quake/mimalloc',
 ]
 
-executable('vkquake', [srcs, shaders_c], dependencies : deps, include_directories : incdirs, c_args : cflags, c_pch: ['Quake/quakedef.h', 'Quake/quakedef.c'])
+executable(
+    'vkquake',
+    [srcs, shaders_c],
+    dependencies : deps,
+    include_directories : incdirs,
+    c_args : cflags,
+    c_pch: ['Quake/quakedef.h', 'Quake/quakedef.c']
+)

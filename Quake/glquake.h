@@ -262,6 +262,9 @@ typedef struct
 	qboolean get_surface_capabilities_2;
 	qboolean get_physical_device_properties_2;
 	qboolean vulkan_1_1_available;
+#ifdef __APPLE__ // Panucci 2026-02-24
+	qboolean enable_portability_extensions;
+#endif
 
 	// Device extensions
 	qboolean dedicated_allocation;

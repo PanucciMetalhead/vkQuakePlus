@@ -737,6 +737,7 @@ static void GL_InitInstance (void)
 
 	vulkan_globals.get_surface_capabilities_2 = false;
 	vulkan_globals.get_physical_device_properties_2 = false;
+	vulkan_globals.enable_portability_extensions = false; // Panucci 2026-02-24
 	if (err == VK_SUCCESS || instance_extension_count > 0)
 	{
 		VkExtensionProperties *extension_props = (VkExtensionProperties *)Mem_Alloc (sizeof (VkExtensionProperties) * instance_extension_count);
@@ -748,6 +749,33 @@ static void GL_InitInstance (void)
 				vulkan_globals.get_surface_capabilities_2 = true;
 			if (strcmp (VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, extension_props[i].extensionName) == 0)
 				vulkan_globals.get_physical_device_properties_2 = true;
+			/*
+			 * Panucci 2026-02-24:
+			 * Easily switch between MoltenVK and KosmicKrisp without recompiling.
+			 *
+			 * The Meson build file from the upstream explicitly links to MoltenVK.
+			 * Switching to KosmicKrisp required an if-else condition in the
+			 * build file and recompiling.
+			 *
+			 * When I linked the executable to the Vulkan loader and ran the engine
+			 * VK_ICD_FILENAMES pointing to MoltenVK, the Vulkan loader threw
+			 * this error:
+			 *
+			 * -----------------------------
+			 * [Vulkan Loader] ERROR | DRIVER: vkCreateInstance: Found drivers that
+			 * contain devices which support the portability subset, but the
+			 * instance does not enumerate portability drivers! Applications that
+			 * wish to enumerate portability drivers must set the
+			 * VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR bit in the
+			 * VkInstanceCreateInfo flags and enable the
+			 * VK_KHR_portability_enumeration instance extension.
+			 * -----------------------------
+			 */
+#ifdef __APPLE__
+			if (strcmp (VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, extension_props[i].extensionName) == 0)
+				vulkan_globals.enable_portability_extensions = true;
+#endif
+
 #if _DEBUG
 			if (strcmp (VK_EXT_DEBUG_UTILS_EXTENSION_NAME, extension_props[i].extensionName) == 0)
 				vulkan_globals.debug_utils = true;
@@ -788,6 +816,14 @@ static void GL_InitInstance (void)
 		instance_extensions[sdl_extension_count + additionalExtensionCount++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
 	if (vulkan_globals.get_physical_device_properties_2)
 		instance_extensions[sdl_extension_count + additionalExtensionCount++] = VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME;
+	// Panucci 2026-02-24
+#ifdef __APPLE__
+	if (vulkan_globals.enable_portability_extensions)
+	{
+		instance_extensions[sdl_extension_count + additionalExtensionCount++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+		instance_create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+	}
+#endif
 
 #ifdef _DEBUG
 	if (vulkan_globals.debug_utils)
