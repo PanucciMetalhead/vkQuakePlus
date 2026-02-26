@@ -26,6 +26,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "atomics.h"
 
+#ifdef USE_NEON
+#include <arm_neon.h>
+#endif
+
 extern cvar_t gl_fullbrights;
 extern cvar_t r_drawflat;
 extern cvar_t r_oldskyleaf;
