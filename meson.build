@@ -74,7 +74,8 @@ run_test_canonicalize_ids_spirv_opt = run_command(spirv_opt, '-h', check : false
 has_canonicalize_ids_spirv_opt = (run_test_canonicalize_ids_spirv_opt.stdout().strip().contains('--canonicalize-ids'))
 bintoc = executable('bintoc', ['Shaders/bintoc.c'], native: true)
 mkpak = executable('mkpak', ['Misc/vq_pak/mkpak.c'], native: true)
-if (build_machine.system() == 'darwin') or get_option('buildtype').startswith('debug')
+
+if get_option('buildtype').startswith('debug')
     spirv_opt_command = [] # MoltenVK spirv-cross has a bug that breaks optimized shaders
 elif has_canonicalize_ids_spirv_opt
 	message('Info: spirv-opt has --canonicalize-ids (glslang >= 16.0).')
