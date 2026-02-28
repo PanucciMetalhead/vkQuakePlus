@@ -125,17 +125,8 @@ Dynamic vertex/index & uniform buffer
 #define INITIAL_DYNAMIC_VERTEX_BUFFER_SIZE_KB  256
 #define INITIAL_DYNAMIC_INDEX_BUFFER_SIZE_KB   1024
 #define INITIAL_DYNAMIC_UNIFORM_BUFFER_SIZE_KB 256
-#define NUM_DYNAMIC_BUFFERS					   2
 #define GARBAGE_FRAME_COUNT					   3
 #define MAX_UNIFORM_ALLOC					   2048
-
-typedef struct
-{
-	VkBuffer		buffer;
-	uint32_t		current_offset;
-	unsigned char  *data;
-	VkDeviceAddress device_address;
-} dynbuffer_t;
 
 static uint32_t		   current_dyn_vertex_buffer_size = INITIAL_DYNAMIC_VERTEX_BUFFER_SIZE_KB * 1024;
 static uint32_t		   current_dyn_index_buffer_size = INITIAL_DYNAMIC_INDEX_BUFFER_SIZE_KB * 1024;
@@ -146,6 +137,7 @@ static vulkan_memory_t dyn_index_buffer_memory;
 static vulkan_memory_t dyn_uniform_buffer_memory;
 static vulkan_memory_t dyn_storage_buffer_memory;
 extern vulkan_memory_t lights_buffer_memory;
+#define NUM_DYNAMIC_BUFFERS 2
 static dynbuffer_t	   dyn_vertex_buffers[NUM_DYNAMIC_BUFFERS];
 static dynbuffer_t	   dyn_index_buffers[NUM_DYNAMIC_BUFFERS];
 static dynbuffer_t	   dyn_uniform_buffers[NUM_DYNAMIC_BUFFERS];
@@ -385,14 +377,13 @@ static void R_SetRTShadows_f (cvar_t *var)
 {
 	if (var->value > 0)
 	{
-		R_CreateAnimatedBLASScratchBuffer ();
 		GL_BuildBModelAccelerationStructures ();
 	}
 	else
 	{
 		GL_DeleteBModelAccelerationStructures ();
 		R_FreeAllEntityBLASes ();
-		R_FreeAnimatedBLASScratchBuffer ();
+		R_FreeASScratchBuffer ();
 	}
 	GL_UpdateLightmapDescriptorSets ();
 }
@@ -750,12 +741,13 @@ void R_StagingUploadBuffer (const VkBuffer buffer, const size_t size, const byte
 R_InitDynamicBuffers
 ===============
 */
-static void R_InitDynamicBuffers (
-	dynbuffer_t *buffers, vulkan_memory_t *memory, uint32_t *current_size, VkBufferUsageFlags usage_flags, qboolean get_device_address, const char *name)
+void R_InitDynamicBuffers (
+	dynbuffer_t *buffers, int num_buffers, vulkan_memory_t *memory, uint32_t *current_size, VkBufferUsageFlags usage_flags, qboolean get_device_address,
+	qboolean device_local, const char *name)
 {
 	int i;
 
-	Sys_Printf ("Reallocating dynamic %ss (%u KB)\n", name, *current_size / 1024);
+	Sys_Printf ("Reallocating dynamic %s%s (%u KB)\n", name, num_buffers != 1 ? "s" : "", *current_size / 1024);
 
 	VkResult err;
 
@@ -767,7 +759,7 @@ static void R_InitDynamicBuffers (
 	buffer_create_info.size = *current_size;
 	buffer_create_info.usage = usage_flags;
 
-	for (i = 0; i < NUM_DYNAMIC_BUFFERS; ++i)
+	for (i = 0; i < num_buffers; ++i)
 	{
 		buffers[i].current_offset = 0;
 
@@ -793,37 +785,48 @@ static void R_InitDynamicBuffers (
 	ZEROED_STRUCT (VkMemoryAllocateInfo, memory_allocate_info);
 	memory_allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	memory_allocate_info.pNext = get_device_address ? &memory_allocate_flags_info : NULL;
-	memory_allocate_info.allocationSize = NUM_DYNAMIC_BUFFERS * aligned_size;
-	memory_allocate_info.memoryTypeIndex =
-		GL_MemoryTypeFromProperties (memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+	memory_allocate_info.allocationSize = num_buffers * aligned_size;
+	if (device_local)
+		memory_allocate_info.memoryTypeIndex = GL_MemoryTypeFromProperties (memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+	else
+		memory_allocate_info.memoryTypeIndex =
+			GL_MemoryTypeFromProperties (memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 
-	R_AllocateVulkanMemory (memory, &memory_allocate_info, VULKAN_MEMORY_TYPE_HOST, &num_vulkan_dynbuf_allocations);
+	R_AllocateVulkanMemory (memory, &memory_allocate_info, device_local ? VULKAN_MEMORY_TYPE_DEVICE : VULKAN_MEMORY_TYPE_HOST, &num_vulkan_dynbuf_allocations);
 	GL_SetObjectName ((uint64_t)memory->handle, VK_OBJECT_TYPE_DEVICE_MEMORY, name);
 
-	for (i = 0; i < NUM_DYNAMIC_BUFFERS; ++i)
+	for (i = 0; i < num_buffers; ++i)
 	{
 		err = vkBindBufferMemory (vulkan_globals.device, buffers[i].buffer, memory->handle, i * aligned_size);
 		if (err != VK_SUCCESS)
 			Sys_Error ("vkBindBufferMemory failed");
 	}
 
-	void *data;
-	err = vkMapMemory (vulkan_globals.device, memory->handle, 0, NUM_DYNAMIC_BUFFERS * aligned_size, 0, &data);
-	if (err != VK_SUCCESS)
-		Sys_Error ("vkMapMemory failed");
-
-	for (i = 0; i < NUM_DYNAMIC_BUFFERS; ++i)
+	if (!device_local)
 	{
-		buffers[i].data = (unsigned char *)data + (i * aligned_size);
+		void *data;
+		err = vkMapMemory (vulkan_globals.device, memory->handle, 0, num_buffers * aligned_size, 0, &data);
+		if (err != VK_SUCCESS)
+			Sys_Error ("vkMapMemory failed");
 
-		if (get_device_address)
+		for (i = 0; i < num_buffers; ++i)
+			buffers[i].data = (unsigned char *)data + (i * aligned_size);
+	}
+	else
+	{
+		for (i = 0; i < num_buffers; ++i)
+			buffers[i].data = NULL;
+	}
+
+	if (get_device_address)
+	{
+		for (i = 0; i < num_buffers; ++i)
 		{
 			VkBufferDeviceAddressInfoKHR buffer_device_address_info;
 			memset (&buffer_device_address_info, 0, sizeof (buffer_device_address_info));
 			buffer_device_address_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
 			buffer_device_address_info.buffer = buffers[i].buffer;
-			VkDeviceAddress device_address = vulkan_globals.vk_get_buffer_device_address (vulkan_globals.device, &buffer_device_address_info);
-			buffers[i].device_address = device_address;
+			buffers[i].device_address = vulkan_globals.vk_get_buffer_device_address (vulkan_globals.device, &buffer_device_address_info);
 		}
 	}
 }
@@ -836,7 +839,8 @@ R_InitDynamicVertexBuffers
 static void R_InitDynamicVertexBuffers (void)
 {
 	R_InitDynamicBuffers (
-		dyn_vertex_buffers, &dyn_vertex_buffer_memory, &current_dyn_vertex_buffer_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, false, "vertex buffer");
+		dyn_vertex_buffers, NUM_DYNAMIC_BUFFERS, &dyn_vertex_buffer_memory, &current_dyn_vertex_buffer_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, false, false,
+		"vertex buffer");
 }
 
 /*
@@ -846,7 +850,9 @@ R_InitDynamicIndexBuffers
 */
 static void R_InitDynamicIndexBuffers (void)
 {
-	R_InitDynamicBuffers (dyn_index_buffers, &dyn_index_buffer_memory, &current_dyn_index_buffer_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, false, "index buffer");
+	R_InitDynamicBuffers (
+		dyn_index_buffers, NUM_DYNAMIC_BUFFERS, &dyn_index_buffer_memory, &current_dyn_index_buffer_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, false, false,
+		"index buffer");
 }
 
 /*
@@ -857,7 +863,8 @@ R_InitDynamicUniformBuffers
 static void R_InitDynamicUniformBuffers (void)
 {
 	R_InitDynamicBuffers (
-		dyn_uniform_buffers, &dyn_uniform_buffer_memory, &current_dyn_uniform_buffer_size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, false, "uniform buffer");
+		dyn_uniform_buffers, NUM_DYNAMIC_BUFFERS, &dyn_uniform_buffer_memory, &current_dyn_uniform_buffer_size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, false,
+		false, "uniform buffer");
 
 	ZEROED_STRUCT (VkDescriptorSetAllocateInfo, descriptor_set_allocate_info);
 	descriptor_set_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -903,7 +910,9 @@ static void R_InitDynamicStorageBuffers (void)
 		get_device_address = true;
 	}
 
-	R_InitDynamicBuffers (dyn_storage_buffers, &dyn_storage_buffer_memory, &current_dyn_storage_buffer_size, usage_flags, get_device_address, "storage buffer");
+	R_InitDynamicBuffers (
+		dyn_storage_buffers, NUM_DYNAMIC_BUFFERS, &dyn_storage_buffer_memory, &current_dyn_storage_buffer_size, usage_flags, get_device_address, false,
+		"storage buffer");
 }
 
 /*
@@ -1020,7 +1029,7 @@ void R_FlushDynamicBuffers (void)
 R_AddDynamicBufferGarbage
 ===============
 */
-static void R_AddDynamicBufferGarbage (vulkan_memory_t memory, dynbuffer_t *buffers, VkDescriptorSet *descriptor_sets)
+void R_AddDynamicBufferGarbage (vulkan_memory_t memory, dynbuffer_t *buffers, int num_buffers, VkDescriptorSet *descriptor_sets)
 {
 	SDL_LockMutex (garbage_mutex);
 
@@ -1039,12 +1048,12 @@ static void R_AddDynamicBufferGarbage (vulkan_memory_t memory, dynbuffer_t *buff
 	{
 		int *num_garbage = &num_buffer_garbage[current_garbage_index];
 		int	 old_num_buffer_garbage = *num_garbage;
-		*num_garbage += NUM_DYNAMIC_BUFFERS;
+		*num_garbage += num_buffers;
 		if (buffer_garbage[current_garbage_index] == NULL)
 			buffer_garbage[current_garbage_index] = Mem_Alloc (sizeof (VkBuffer) * (*num_garbage));
 		else
 			buffer_garbage[current_garbage_index] = Mem_Realloc (buffer_garbage[current_garbage_index], sizeof (VkBuffer) * (*num_garbage));
-		for (int i = 0; i < NUM_DYNAMIC_BUFFERS; ++i)
+		for (int i = 0; i < num_buffers; ++i)
 			buffer_garbage[current_garbage_index][old_num_buffer_garbage + i] = buffers[i].buffer;
 	}
 
@@ -1119,7 +1128,7 @@ byte *R_DynBufferAllocate (
 
 	if ((dyn_buffer->current_offset + q_max (size, min_tail_size)) > *current_size)
 	{
-		R_AddDynamicBufferGarbage (*memory, dyn_buffers, descriptor_sets);
+		R_AddDynamicBufferGarbage (*memory, dyn_buffers, NUM_DYNAMIC_BUFFERS, descriptor_sets);
 		*current_size = q_max (*current_size * 2, (uint32_t)Q_nextPow2 (size));
 		init_func ();
 	}
@@ -1199,46 +1208,6 @@ byte *R_UniformAllocate (int size, VkBuffer *buffer, uint32_t *buffer_offset, Vk
 
 	*buffer_offset = device_size_offset;
 	return data;
-}
-
-/*
-===============
-R_CreateAnimatedBLASScratchBuffer
-===============
-*/
-void R_CreateAnimatedBLASScratchBuffer (void)
-{
-	if (!vulkan_globals.ray_query || r_rtshadows.value <= 0 || vulkan_globals.scratch_buffer != VK_NULL_HANDLE)
-		return;
-
-	buffer_create_info_t buffer_create_info = {
-		.buffer = &vulkan_globals.scratch_buffer,
-		.size = SCRATCH_BUFFER_SIZE_MB * 1024 * 1024,
-		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-				 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-		.address = &vulkan_globals.scratch_buffer_address,
-		.alignment = vulkan_globals.physical_device_acceleration_structure_properties.minAccelerationStructureScratchOffsetAlignment,
-		.name = "Animated AS scratch",
-	};
-	R_CreateBuffers (
-		1, &buffer_create_info, &vulkan_globals.scratch_buffer_memory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &num_vulkan_misc_allocations,
-		"Animated AS scratch");
-}
-
-/*
-===============
-R_FreeAnimatedBLASScratchBuffer
-===============
-*/
-void R_FreeAnimatedBLASScratchBuffer (void)
-{
-	if (vulkan_globals.scratch_buffer == VK_NULL_HANDLE)
-		return;
-
-	GL_WaitForDeviceIdle ();
-	R_FreeBuffers (1, &vulkan_globals.scratch_buffer, &vulkan_globals.scratch_buffer_memory, &num_vulkan_misc_allocations);
-	vulkan_globals.scratch_buffer = VK_NULL_HANDLE;
-	vulkan_globals.scratch_buffer_address = 0;
 }
 
 /*
@@ -4008,7 +3977,6 @@ void R_NewMap (void)
 
 	GL_BuildLightmaps ();
 	GL_BuildBModelVertexBuffer ();
-	R_CreateAnimatedBLASScratchBuffer ();
 	GL_BuildBModelAccelerationStructures ();
 	GL_PrepareSIMDAndParallelData ();
 	GL_SetupIndirectDraws ();
