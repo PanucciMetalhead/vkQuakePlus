@@ -130,8 +130,46 @@ void R_EnsureASScratchBufferSize (uint32_t required_size)
 		as_scratch_buffer_size = q_max (as_scratch_buffer_size * 2, Q_nextPow2 (required_size));
 	}
 
-	VkBufferUsageFlags usage_flags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-	R_InitDynamicBuffers (&as_scratch_buffer, 1, &as_scratch_memory, &as_scratch_buffer_size, usage_flags, true, true, "AS scratch buffer");
+	Sys_Printf ("Reallocating dynamic AS scratch buffer (%u KB)\n", as_scratch_buffer_size / 1024);
+
+	VkResult err;
+
+	ZEROED_STRUCT (VkBufferCreateInfo, buffer_create_info);
+	buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	buffer_create_info.size = as_scratch_buffer_size;
+	buffer_create_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
+
+	err = vkCreateBuffer (vulkan_globals.device, &buffer_create_info, NULL, &as_scratch_buffer.buffer);
+	if (err != VK_SUCCESS)
+		Sys_Error ("vkCreateBuffer failed");
+	GL_SetObjectName ((uint64_t)as_scratch_buffer.buffer, VK_OBJECT_TYPE_BUFFER, "AS scratch buffer");
+
+	VkMemoryRequirements memory_requirements;
+	vkGetBufferMemoryRequirements (vulkan_globals.device, as_scratch_buffer.buffer, &memory_requirements);
+
+	ZEROED_STRUCT (VkMemoryAllocateFlagsInfo, memory_allocate_flags_info);
+	memory_allocate_flags_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO_KHR;
+	memory_allocate_flags_info.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+
+	ZEROED_STRUCT (VkMemoryAllocateInfo, memory_allocate_info);
+	memory_allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	memory_allocate_info.pNext = &memory_allocate_flags_info;
+	memory_allocate_info.allocationSize = memory_requirements.size;
+	memory_allocate_info.memoryTypeIndex = GL_MemoryTypeFromProperties (memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+
+	R_AllocateVulkanMemory (&as_scratch_memory, &memory_allocate_info, VULKAN_MEMORY_TYPE_DEVICE, &num_vulkan_dynbuf_allocations);
+	GL_SetObjectName ((uint64_t)as_scratch_memory.handle, VK_OBJECT_TYPE_DEVICE_MEMORY, "AS scratch buffer");
+
+	err = vkBindBufferMemory (vulkan_globals.device, as_scratch_buffer.buffer, as_scratch_memory.handle, 0);
+	if (err != VK_SUCCESS)
+		Sys_Error ("vkBindBufferMemory failed");
+
+	ZEROED_STRUCT (VkBufferDeviceAddressInfoKHR, buffer_device_address_info);
+	buffer_device_address_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
+	buffer_device_address_info.buffer = as_scratch_buffer.buffer;
+	as_scratch_buffer.device_address = vulkan_globals.vk_get_buffer_device_address (vulkan_globals.device, &buffer_device_address_info);
+	as_scratch_buffer.current_offset = 0;
 }
 
 /*
@@ -144,10 +182,8 @@ void R_FreeASScratchBuffer (void)
 	if (as_scratch_buffer.buffer != VK_NULL_HANDLE)
 	{
 		vkDestroyBuffer (vulkan_globals.device, as_scratch_buffer.buffer, NULL);
-		R_FreeVulkanMemory (&as_scratch_memory, &num_vulkan_dynbuf_allocations);
 		memset (&as_scratch_buffer, 0, sizeof (as_scratch_buffer));
-		memset (&as_scratch_memory, 0, sizeof (as_scratch_memory));
-		as_scratch_buffer_size = INITIAL_SCRATCH_BUFFER_SIZE_MB * 1024 * 1024;
+		R_FreeVulkanMemory (&as_scratch_memory, &num_vulkan_dynbuf_allocations);
 	}
 }
 
