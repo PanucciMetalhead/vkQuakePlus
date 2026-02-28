@@ -59,8 +59,15 @@ extern int glwidth, glheight;
 #define NUM_COLOR_BUFFERS			   2
 #define INITIAL_STAGING_BUFFER_SIZE_KB 16384
 
-#define FAN_INDEX_BUFFER_SIZE  126
-#define SCRATCH_BUFFER_SIZE_MB 16
+#define FAN_INDEX_BUFFER_SIZE 126
+
+typedef struct
+{
+	VkBuffer		buffer;
+	uint32_t		current_offset;
+	unsigned char  *data;
+	VkDeviceAddress device_address;
+} dynbuffer_t;
 
 #define LIGHTMAP_BYTES 4
 
@@ -339,11 +346,6 @@ typedef struct
 	vulkan_desc_set_layout_t ray_debug_set_layout;
 	vulkan_desc_set_layout_t joints_buffer_set_layout;
 
-	// Scratch buffer for animated AS building (vertex positions + AS build scratch)
-	VkBuffer		scratch_buffer;
-	VkDeviceAddress scratch_buffer_address;
-	vulkan_memory_t scratch_buffer_memory;
-
 	// Samplers
 	VkSampler point_sampler;
 	VkSampler linear_sampler;
@@ -618,6 +620,11 @@ void R_AllocateEntityBLAS (entity_t *e);
 void R_FreeEntityBLAS (entity_t *e);
 void R_FreeAllEntityBLASes (void);
 
+extern dynbuffer_t as_scratch_buffer;
+extern uint32_t	   as_scratch_buffer_size;
+void			   R_EnsureASScratchBufferSize (uint32_t required_size);
+void			   R_FreeASScratchBuffer (void);
+
 int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache, vec3_t *lightcolor);
 
 void R_BuildLightMap (msurface_t *surf, byte *dest, int stride);
@@ -741,14 +748,18 @@ void  R_StagingUploadBuffer (const VkBuffer buffer, const size_t size, const byt
 void		   R_InitGPUBuffers (void);
 void		   R_InitMeshHeap (void);
 glheapstats_t *R_GetMeshHeapStats (void);
-void		   R_SwapDynamicBuffers (void);
-void		   R_FlushDynamicBuffers (void);
-void		   R_CollectDynamicBufferGarbage (void);
-void		   R_CollectMeshBufferGarbage (void);
-byte		  *R_VertexAllocate (int size, VkBuffer *buffer, VkDeviceSize *buffer_offset);
-byte		  *R_IndexAllocate (int size, VkBuffer *buffer, VkDeviceSize *buffer_offset);
-byte		  *R_UniformAllocate (int size, VkBuffer *buffer, uint32_t *buffer_offset, VkDescriptorSet *descriptor_set);
-byte		  *R_StorageAllocate (int size, VkBuffer *buffer, VkDeviceSize *buffer_offset, VkDeviceAddress *device_address);
+void		   R_InitDynamicBuffers (
+			  dynbuffer_t *buffers, int num_buffers, vulkan_memory_t *memory, uint32_t *current_size, VkBufferUsageFlags usage_flags, qboolean get_device_address,
+			  qboolean device_local, const char *name);
+void  R_AddDynamicBufferGarbage (vulkan_memory_t memory, dynbuffer_t *buffers, int num_buffers, VkDescriptorSet *descriptor_sets);
+void  R_SwapDynamicBuffers (void);
+void  R_FlushDynamicBuffers (void);
+void  R_CollectDynamicBufferGarbage (void);
+void  R_CollectMeshBufferGarbage (void);
+byte *R_VertexAllocate (int size, VkBuffer *buffer, VkDeviceSize *buffer_offset);
+byte *R_IndexAllocate (int size, VkBuffer *buffer, VkDeviceSize *buffer_offset);
+byte *R_UniformAllocate (int size, VkBuffer *buffer, uint32_t *buffer_offset, VkDescriptorSet *descriptor_set);
+byte *R_StorageAllocate (int size, VkBuffer *buffer, VkDeviceSize *buffer_offset, VkDeviceAddress *device_address);
 
 void R_AllocateLightmapComputeBuffers ();
 
