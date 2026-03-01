@@ -200,7 +200,7 @@ srcs = [
 	 run_generate_embedded_pak,
 ]
 
-cflags = ['-Wall', '-Wno-trigraphs', '-Werror', '-std=gnu11']
+cflags = ['-Wall', '-Wno-trigraphs', '-Werror']
 
 if use_sdl3
     sdl_dep = dependency('sdl3')
@@ -292,5 +292,5 @@ executable(
     dependencies : deps,
     include_directories : incdirs,
     c_args : cflags,
-    c_pch: ['Quake/quakedef.h', 'Quake/quakedef.c']
+#    c_pch: ['Quake/quakedef.h', 'Quake/quakedef.c']
 )
