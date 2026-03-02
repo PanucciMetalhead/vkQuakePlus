@@ -28,8 +28,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <errno.h>
 #include <unistd.h>
 #include <execinfo.h>
+#include <signal.h>
 #ifdef PLATFORM_OSX
 #include <libgen.h> /* dirname() and basename() */
+#include <sys/sysctl.h>
 #endif
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -254,20 +256,26 @@ void Sys_Error (const char *error, ...)
 	va_list argptr;
 	char	text[4096];
 
-	PR_SwitchQCVM (NULL);
 	host_parms->errstate++;
 
 	va_start (argptr, error);
 	q_vsnprintf (text, sizeof (text), error, argptr);
 	va_end (argptr);
 
-	fputs (errortxt1, stderr);
+	Sys_DebugBreak ();
+
+	if (!Sys_IsInDebugger ())
+		q_snprintf (text + strnlen (text, sizeof (text)), sizeof (text), "\nSTACK TRACE:\n%s", Sys_StackTrace ());
+
+	PR_SwitchQCVM (NULL);
+
+	fputs (errortxt1, stdout);
 	Host_Shutdown ();
-	fputs (errortxt2, stderr);
-	q_snprintf (text + strnlen (text, sizeof (text)), sizeof (text), "\nSTACK TRACE:\n%s", Sys_StackTrace ());
-	fputs (text, stderr);
-	fputs ("\n\n", stderr);
-	if (!isDedicated)
+	fputs (errortxt2, stdout);
+
+	Sys_Printf (text, "%s\n\n", text);
+
+	if (!isDedicated && !Sys_IsInDebugger ())
 		PL_ErrorDialog (text);
 
 	exit (1);
@@ -391,9 +399,20 @@ const char *Sys_StackTrace (void)
 
 	int nb_frames = backtrace (buffer, MAX_STACK_FRAMES);
 
+	// display on 1 line to pass to addr2line easily:
+	for (int frame_index = 0; frame_index < nb_frames; frame_index++)
+	{
+		q_snprintf (output_buffer + strnlen (output_buffer, OUTPUT_BUFFER_SIZE), OUTPUT_BUFFER_SIZE, "0x%" PRIxPTR " ", (uintptr_t)buffer[frame_index]);
+		if (frame_index == nb_frames - 1)
+			q_snprintf (output_buffer + strnlen (output_buffer, OUTPUT_BUFFER_SIZE), OUTPUT_BUFFER_SIZE, "\n");
+	}
+
+	// Then print 1 frame per line, together with its symbol using backtrace_symbols()
+	// This is not working on MacOS, skip it and only rely on addr2line to solve addresses
+#if !defined(PLATFORM_OSX)
+
 	char **symbols = backtrace_symbols (buffer, nb_frames);
 
-	// Print 1 frame per line, together with its symbol
 	for (int frame_index = 0; frame_index < nb_frames; frame_index++)
 	{
 		// this is not super-safe
@@ -403,9 +422,55 @@ const char *Sys_StackTrace (void)
 	}
 
 	free (symbols);
+#endif
 
 	return output_buffer;
 
 #undef MAX_STACK_FRAMES
 #undef OUTPUT_BUFFER_SIZE
+}
+
+bool Sys_IsInDebugger (void)
+{
+#if !defined(PLATFORM_OSX)
+	FILE *f = fopen ("/proc/self/status", "r");
+	if (!f)
+		return false;
+
+	char line[256];
+
+	while (fgets (line, sizeof (line), f))
+	{
+		if (strncmp (line, "TracerPid:", 10) == 0)
+		{
+			int pid = atoi (line + 10);
+			fclose (f);
+			return pid != 0;
+		}
+	}
+	fclose (f);
+#else
+	int				  mib[4];
+	struct kinfo_proc info;
+	size_t			  size = sizeof (info);
+	info.kp_proc.p_flag = 0;
+
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_PROC;
+	mib[2] = KERN_PROC_PID;
+	mib[3] = getpid ();
+
+	if (sysctl (mib, 4, &info, &size, NULL, 0) == -1)
+		return false;
+
+	return (info.kp_proc.p_flag & P_TRACED) != 0;
+#endif
+
+	return false;
+}
+
+void Sys_DebugBreak (void)
+{
+	if (Sys_IsInDebugger ())
+		raise (SIGTRAP);
 }

@@ -774,7 +774,7 @@ void MSG_WriteChar (sizebuf_t *sb, int c)
 {
 	byte *buf;
 
-#ifdef PARANOID
+#if defined(DEBUG) || defined(_DEBUG)
 	if (c < -128 || c > 127)
 		Host_Error ("MSG_WriteChar: range error = %i not in -128..127", c);
 #endif
@@ -787,7 +787,7 @@ void MSG_WriteByte (sizebuf_t *sb, int c)
 {
 	byte *buf;
 
-#ifdef PARANOID
+#if defined(DEBUG) || defined(_DEBUG)
 	if (c < 0 || c > 255)
 		Host_Error ("MSG_WriteByte: range error = %i not in 0..255", c);
 #endif
@@ -800,7 +800,7 @@ void MSG_WriteShort (sizebuf_t *sb, int c)
 {
 	byte *buf;
 
-#ifdef PARANOID
+#if defined(DEBUG) || defined(_DEBUG)
 	// it is apparently used to encode signed OR unsigned shorts...
 	if (c < INT16_MIN || c > UINT16_MAX)
 		Host_Error ("MSG_WriteShort: range error = %i not in -32768..65535", c);
@@ -3434,4 +3434,33 @@ int32_t COM_Rand ()
 	xorshiro_state[1] = rotl (s1, 13);
 
 	return (int32_t)(result & COM_RAND_MAX);
+}
+
+void COM_Assert_Failed (const char *expr, const char *file_path, int line)
+{
+	// only keep the simple file name, strip the directory part
+	// we only want the short file name, not the full path:
+	char *last_sep = strrchr (file_path, '\\');
+
+	if (!last_sep)
+		last_sep = strrchr (file_path, '/');
+
+	const char *filename = (last_sep ? last_sep + 1 : file_path);
+
+	if (Tasks_IsWorker ())
+	{
+		Sys_DebugBreak ();
+
+		if (!Sys_IsInDebugger ())
+		{
+			char msg[4096];
+			q_snprintf (msg, 4096, "%s:%d Assertion: '%s' failed\n", filename, line, expr);
+			q_snprintf (msg + strnlen (msg, 4096), 4096, "STACK TRACE:\n");
+			q_snprintf (msg + strnlen (msg, 4096), 4096, "%s", Sys_StackTrace ());
+			PL_ErrorDialog (msg);
+		}
+		exit (1);
+	}
+	else // We are in the main thread, console is accessible, do Host_Error and we can recover.
+		Host_Error ("%s:%d Assertion: '%s' failed", filename, line, expr);
 }

@@ -219,17 +219,23 @@ void Host_Error (const char *error, ...)
 		Sys_Error ("Host_Error: recursively entered");
 	inerror = true;
 
-	Con_Printf ("================ STACK TRACE ================\n");
-	Con_Printf ("%s", Sys_StackTrace ());
-	Con_Printf ("=============================================\n");
+	va_start (argptr, error);
+	q_vsnprintf (string, sizeof (string), error, argptr);
+	va_end (argptr);
+
+	Sys_DebugBreak ();
+
+	if (!Sys_IsInDebugger ())
+	{
+		Con_Printf ("================ STACK TRACE ================\n");
+		Con_Printf ("%s", Sys_StackTrace ());
+		Con_Printf ("=============================================\n");
+	}
 
 	PR_SwitchQCVM (NULL);
 
 	SCR_EndLoadingPlaque (); // reenable screen updates
 
-	va_start (argptr, error);
-	q_vsnprintf (string, sizeof (string), error, argptr);
-	va_end (argptr);
 	Con_Printf ("Host_Error: %s\n", string);
 
 	if (cl.qcvm.extfuncs.CSQC_DrawHud && in_update_screen)
@@ -308,8 +314,8 @@ void Host_Version_f (void)
 	Con_Printf ("QuakeSpasm Version " QUAKESPASM_VER_STRING "\n");
 	Con_Printf ("vkQuake Version " ENGINE_NAME_AND_VER "\n");
 
-#ifdef PARANOID
-	const char *build_str_suffix = "(PARANOID build)";
+#if defined(DEBUG) || defined(_DEBUG)
+	const char *build_str_suffix = "(DEBUG build)";
 #else
 	const char *build_str_suffix = "";
 #endif
@@ -815,7 +821,7 @@ static void CL_LoadCSProgs (void)
 			qcvm->max_edicts = CLAMP (MIN_EDICTS, (int)max_edicts.value, MAX_EDICTS);
 			qcvm->edicts = (edict_t *)Mem_Alloc (qcvm->max_edicts * qcvm->edict_size);
 			qcvm->num_edicts = qcvm->reserved_edicts = 1;
-#ifdef PARANOID
+#if defined(DEBUG) || defined(_DEBUG)
 			// set debug fiels for all max_edicts
 			for (int i = 0; i < qcvm->max_edicts; i++)
 			{
@@ -1102,8 +1108,8 @@ void Host_Init (void)
 	NET_Init ();
 	SV_Init ();
 
-#ifdef PARANOID
-	const char *build_str_suffix = "(PARANOID build)";
+#if defined(DEBUG) || defined(_DEBUG)
+	const char *build_str_suffix = "(DEBUG build)";
 #else
 	const char *build_str_suffix = "";
 #endif
