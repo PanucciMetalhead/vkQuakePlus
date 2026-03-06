@@ -76,10 +76,10 @@ void Sys_SendKeyEvents (void);
 // Perform Key_Event () callbacks until the input que is empty
 
 // Pin the calling Thread to core core_index, return true if succcessfull
-bool Sys_Pin_Current_Thread (int core_index);
+bool Sys_PinCurrentThread (int core_index);
 
 // Return the stack trace at the point of this call.
-// The returned string is a per-thread static buffer (no deallocation needed)
+// This string is allocated by Mem_Alloc
 const char *Sys_StackTrace (void);
 
 // Return true if we are running in a debugger

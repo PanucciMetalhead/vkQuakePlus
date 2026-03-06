@@ -254,18 +254,25 @@ static const char errortxt2[] = "\nQUAKE ERROR: ";
 void Sys_Error (const char *error, ...)
 {
 	va_list argptr;
-	char	text[4096];
+
+	char *text = NULL;
 
 	host_parms->errstate++;
 
 	va_start (argptr, error);
-	q_vsnprintf (text, sizeof (text), error, argptr);
+	text = q_vstrcatf (text, error, argptr);
 	va_end (argptr);
 
 	Sys_DebugBreak ();
 
 	if (!Sys_IsInDebugger ())
-		q_snprintf (text + strnlen (text, sizeof (text)), sizeof (text), "\nSTACK TRACE:\n%s", Sys_StackTrace ());
+	{
+		const char *captured_stack_trace = Sys_StackTrace ();
+
+		text = q_strcatf (text, "\nSTACK TRACE:\n%s", captured_stack_trace);
+
+		Mem_Free (captured_stack_trace);
+	}
 
 	PR_SwitchQCVM (NULL);
 
@@ -277,6 +284,8 @@ void Sys_Error (const char *error, ...)
 
 	if (!isDedicated && !Sys_IsInDebugger ())
 		PL_ErrorDialog (text);
+
+	Mem_Free (text);
 
 	exit (1);
 }
@@ -363,7 +372,7 @@ void Sys_SendKeyEvents (void)
 	IN_SendKeyEvents ();
 }
 
-bool Sys_Pin_Current_Thread (int core_index)
+bool Sys_PinCurrentThread (int core_index)
 {
 #if defined(PLATFORM_UNIX) && !defined(PLATFORM_OSX) && !defined(PLATFORM_BSD) && !defined(TASK_AFFINITY_NOT_AVAILABLE)
 #pragma message("Info : Pinned tasks support for *Nix enabled using pthread_setaffinity_np()...")
@@ -388,41 +397,33 @@ bool Sys_Pin_Current_Thread (int core_index)
 
 const char *Sys_StackTrace (void)
 {
-#define MAX_STACK_FRAMES   24
-#define OUTPUT_BUFFER_SIZE (MAX_STACK_FRAMES * 1024)
+#define MAX_STACK_FRAMES 24
 
-	static THREAD_LOCAL char output_buffer[OUTPUT_BUFFER_SIZE];
-
-	memset (output_buffer, 0, OUTPUT_BUFFER_SIZE);
+	char *output_buffer = NULL;
 
 	void *buffer[MAX_STACK_FRAMES];
 
 	int nb_frames = backtrace (buffer, MAX_STACK_FRAMES);
 
-	// display on 1 line to pass to addr2line easily:
+#if defined(PLATFORM_OSX)
+	// display on 1 line to pass to atos easily on MacOS:
 	for (int frame_index = 0; frame_index < nb_frames; frame_index++)
 	{
-		q_snprintf (output_buffer + strnlen (output_buffer, OUTPUT_BUFFER_SIZE), OUTPUT_BUFFER_SIZE, "0x%" PRIxPTR " ", (uintptr_t)buffer[frame_index]);
+		output_buffer = q_strcatf (output_buffer, "0x%" PRIxPTR " ", (uintptr_t)buffer[frame_index]);
+
 		if (frame_index == nb_frames - 1)
-			q_snprintf (output_buffer + strnlen (output_buffer, OUTPUT_BUFFER_SIZE), OUTPUT_BUFFER_SIZE, "\n");
+			output_buffer = q_strcatf (output_buffer, "\n");
 	}
-
+#endif
 	// Then print 1 frame per line, together with its symbol using backtrace_symbols()
-	// This is not working on MacOS, skip it and only rely on addr2line to solve addresses
-#if !defined(PLATFORM_OSX)
-
 	char **symbols = backtrace_symbols (buffer, nb_frames);
 
 	for (int frame_index = 0; frame_index < nb_frames; frame_index++)
 	{
-		// this is not super-safe
-		q_snprintf (
-			output_buffer + strnlen (output_buffer, OUTPUT_BUFFER_SIZE), OUTPUT_BUFFER_SIZE, "%-2i: %s\n", frame_index,
-			(symbols && symbols[frame_index]) ? symbols[frame_index] : "[no symbols]");
+		output_buffer = q_strcatf (output_buffer, "%-2i: %s\n", frame_index, (symbols && symbols[frame_index]) ? symbols[frame_index] : "[no symbols]");
 	}
 
 	free (symbols);
-#endif
 
 	return output_buffer;
 

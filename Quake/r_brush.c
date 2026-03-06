@@ -116,12 +116,12 @@ static vulkan_memory_t	   bmodel_as_device_memory;
 static VkAccelerationStructureKHR tlas_garbage[TLAS_GARBAGE_FRAME_COUNT];
 static int						  tlas_garbage_index;
 
-#define INITIAL_SCRATCH_BUFFER_SIZE_MB 8
+#define MIN_SCRATCH_BUFFER_SIZE_MB 8
 
 // Shared scratch buffer for all AS operations (bmodel BLAS build, TLAS build, animated BLAS updates)
 dynbuffer_t			   as_scratch_buffer;
 static vulkan_memory_t as_scratch_memory;
-uint32_t			   as_scratch_buffer_size = INITIAL_SCRATCH_BUFFER_SIZE_MB * 1024 * 1024;
+uint32_t			   as_scratch_buffer_size;
 
 /*
 ===============
@@ -130,14 +130,12 @@ R_EnsureASScratchBufferSize
 */
 void R_EnsureASScratchBufferSize (uint32_t required_size)
 {
-	if (required_size <= as_scratch_buffer_size && as_scratch_buffer.buffer != VK_NULL_HANDLE)
+	if (required_size <= as_scratch_buffer_size)
 		return;
 
 	if (as_scratch_buffer.buffer != VK_NULL_HANDLE)
-	{
 		R_AddDynamicBufferGarbage (as_scratch_memory, &as_scratch_buffer, 1, NULL);
-		as_scratch_buffer_size = q_max (as_scratch_buffer_size * 2, Q_nextPow2 (required_size));
-	}
+	as_scratch_buffer_size = Q_nextPow2 (q_max (required_size, MIN_SCRATCH_BUFFER_SIZE_MB * 1024 * 1024));
 
 	Sys_Printf ("Reallocating dynamic AS scratch buffer (%u KB)\n", as_scratch_buffer_size / 1024);
 
@@ -194,6 +192,7 @@ void R_FreeASScratchBuffer (void)
 		memset (&as_scratch_buffer, 0, sizeof (as_scratch_buffer));
 		R_FreeVulkanMemory (&as_scratch_memory, &num_vulkan_dynbuf_allocations);
 	}
+	as_scratch_buffer_size = 0;
 }
 
 /*
