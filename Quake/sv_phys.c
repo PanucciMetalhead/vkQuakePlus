@@ -1001,6 +1001,7 @@ static void SV_Physics_Client (edict_t *ent, int num)
 	pr_global_struct->self = EDICT_TO_PROG (ent);
 	PR_ExecuteProgram (pr_global_struct->PlayerPreThink);
 
+	assert (!ent->free);
 	//
 	// do a move
 	//
@@ -1022,6 +1023,7 @@ static void SV_Physics_Client (edict_t *ent, int num)
 		if (!SV_CheckWater (ent) && !((int)ent->v.flags & FL_WATERJUMP))
 			SV_AddGravity (ent);
 		SV_CheckStuck (ent);
+		assert (!ent->free);
 		SV_WalkMove (ent);
 		break;
 
@@ -1051,6 +1053,8 @@ static void SV_Physics_Client (edict_t *ent, int num)
 	// call standard player post-think
 	//
 	SV_LinkEdict (ent, true);
+
+	assert (!ent->free);
 
 	pr_global_struct->time = qcvm->time;
 	pr_global_struct->self = EDICT_TO_PROG (ent);
@@ -1236,6 +1240,8 @@ static void SV_Physics_Step (edict_t *ent)
 		SV_FlyMove (ent, host_frametime, NULL);
 		SV_LinkEdict (ent, true);
 
+		assert (!ent->free);
+
 		if ((int)ent->v.flags & FL_ONGROUND) // just hit ground
 		{
 			if (hitsound)
@@ -1244,12 +1250,22 @@ static void SV_Physics_Step (edict_t *ent)
 	}
 
 	// regular thinking
-	SV_RunThink (ent);
-
-	SV_CheckWaterTransition (ent);
+	if (SV_RunThink (ent))
+		SV_CheckWaterTransition (ent);
 }
 
 //============================================================================
+
+// track ED_Alloc during SV_Physics execution
+static void SV_Physics_Alloc_Hook (edict_t *e)
+{
+	// track the newly allocated edicts in order to add them into the pushable_ent_cache.
+	// this is OK because by construction free edicts cannot be reused immediatly,
+	// so e is garanteed not to be in pushable_ent_cache already.
+	// since they are just allocated, they have a blank state so we add all of them
+	// to pushable_ent_cache regardless, and the pushable test will be made later on in SV_PushMove in any case.
+	pushable_ent_cache[num_pushable_ent_cache++] = e;
+}
 
 /*
 ================
@@ -1262,6 +1278,8 @@ void SV_Physics (void)
 	int		 i;
 	int		 entity_cap; // For sv_freezenonclients
 	edict_t *ent;
+
+	ED_AllocHook_func previous_alloc_hook = NULL;
 
 	int physics_mode;
 	if (qcvm->extglobals.physics_mode)
@@ -1323,6 +1341,8 @@ void SV_Physics (void)
 
 			pushable_ent_cache[num_pushable_ent_cache++] = check;
 		}
+
+		previous_alloc_hook = ED_AllocSetHook (SV_Physics_Alloc_Hook);
 	}
 
 	// for (i=0 ; i<sv.num_edicts ; i++, ent = NEXT_EDICT(ent))
@@ -1334,6 +1354,7 @@ void SV_Physics (void)
 		if (pr_global_struct->force_retouch)
 		{
 			SV_LinkEdict (ent, true); // force retouch even for stationary
+			assert (!ent->free);
 		}
 
 		if (i > 0 && i <= svs.maxclients && qcvm == &sv.qcvm)
@@ -1372,4 +1393,7 @@ void SV_Physics (void)
 
 	if (!(sv_freezenonclients.value && qcvm == &sv.qcvm))
 		qcvm->time += host_frametime;
+
+	if (sv_fastpushmove.value > 0.f)
+		ED_AllocSetHook (previous_alloc_hook);
 }
