@@ -15,6 +15,8 @@ cc = meson.get_compiler('c')
 # Always build keeping frame pointers to get better backtraces
 add_project_arguments(['-fno-omit-frame-pointer'], language: 'c')
 
+add_project_link_arguments(['-fuse-ld=lld', '-flto'], language: 'c')
+
 if cc.has_header_symbol('sched.h', 'CPU_ZERO', prefix: '#define _GNU_SOURCE')
     message('Info: Task affinity support enabled.')
     add_project_arguments('-D_GNU_SOURCE', language: 'c')
