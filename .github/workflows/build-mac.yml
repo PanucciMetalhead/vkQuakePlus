@@ -11,7 +11,7 @@ jobs:
       matrix:
         configuration: [release, debug]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Install Dependencies
       run: brew install molten-vk vulkan-headers glslang spirv-tools sdl2 libvorbis flac opus opusfile flac mpg123 meson
     - name: Build vkQuake
@@ -21,14 +21,10 @@ jobs:
         dsymutil build/vkquake -o build/vkquake.dSYM
         du -sh build/vkquake build/vkquake.dSYM
         dwarfdump --uuid build/vkquake build/vkquake.dSYM
-    - name: Copy HOWTO to the artifact root
-      run: |
-        cp "Packaging/MacOS/Reading_Stack_Traces_HOWTO_MacOS.md" "build/Reading_Stack_Traces_HOWTO_MacOS.md"    
     - name: Upload vkQuake
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: vkQuake archive (${{ matrix.configuration }})
         path: |
           build/vkquake
           build/vkquake.dSYM
-          build/Reading_Stack_Traces_HOWTO_MacOS.md
