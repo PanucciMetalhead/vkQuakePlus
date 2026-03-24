@@ -921,6 +921,7 @@ enum
 	DRIVER_ID_MESA_PANVK = 20,
 	DRIVER_ID_SAMSUNG_PROPRIETARY = 21,
 	DRIVER_ID_MESA_VENUS = 22,
+	DRIVER_ID_MESA_KOSMICKRISP = 23,
 };
 
 /*
@@ -932,39 +933,40 @@ static const char *GetDeviceVendorFromDriverProperties (VkPhysicalDeviceDriverPr
 {
 	switch ((int)driver_properties->driverID)
 	{
-	case DRIVER_ID_AMD_PROPRIETARY:
-	case DRIVER_ID_AMD_OPEN_SOURCE:
-	case DRIVER_ID_MESA_RADV:
-		return "AMD";
-	case DRIVER_ID_NVIDIA_PROPRIETARY:
-		return "NVIDIA";
-	case DRIVER_ID_INTEL_PROPRIETARY_WINDOWS:
-	case DRIVER_ID_INTEL_OPEN_SOURCE_MESA:
-		return "Intel";
-	case DRIVER_ID_IMAGINATION_PROPRIETARY:
-		return "ImgTec";
-	case DRIVER_ID_QUALCOMM_PROPRIETARY:
-	case DRIVER_ID_MESA_TURNIP:
-		return "Qualcomm";
-	case DRIVER_ID_ARM_PROPRIETARY:
-	case DRIVER_ID_MESA_PANVK:
-		return "ARM";
-	case DRIVER_ID_GOOGLE_SWIFTSHADER:
-	case DRIVER_ID_GGP_PROPRIETARY:
-		return "Google";
-	case DRIVER_ID_BROADCOM_PROPRIETARY:
-		return "Broadcom";
-	case DRIVER_ID_MESA_V3DV:
-		return "Raspberry Pi";
-	case DRIVER_ID_MESA_LLVMPIPE:
-	case DRIVER_ID_MESA_VENUS:
-		return "MESA";
-	case DRIVER_ID_MOLTENVK:
-		return "MoltenVK";
-	case DRIVER_ID_SAMSUNG_PROPRIETARY:
-		return "Samsung";
-	default:
-		return NULL;
+		case DRIVER_ID_AMD_PROPRIETARY:
+		case DRIVER_ID_AMD_OPEN_SOURCE:
+		case DRIVER_ID_MESA_RADV:
+			return "AMD";
+		case DRIVER_ID_NVIDIA_PROPRIETARY:
+			return "NVIDIA";
+		case DRIVER_ID_INTEL_PROPRIETARY_WINDOWS:
+		case DRIVER_ID_INTEL_OPEN_SOURCE_MESA:
+			return "Intel";
+		case DRIVER_ID_IMAGINATION_PROPRIETARY:
+			return "ImgTec";
+		case DRIVER_ID_QUALCOMM_PROPRIETARY:
+		case DRIVER_ID_MESA_TURNIP:
+			return "Qualcomm";
+		case DRIVER_ID_ARM_PROPRIETARY:
+		case DRIVER_ID_MESA_PANVK:
+			return "ARM";
+		case DRIVER_ID_GOOGLE_SWIFTSHADER:
+		case DRIVER_ID_GGP_PROPRIETARY:
+			return "Google";
+		case DRIVER_ID_BROADCOM_PROPRIETARY:
+			return "Broadcom";
+		case DRIVER_ID_MESA_V3DV:
+			return "Raspberry Pi";
+		case DRIVER_ID_MESA_LLVMPIPE:
+		case DRIVER_ID_MESA_VENUS:
+			return "Mesa";
+		case DRIVER_ID_MOLTENVK:
+		case DRIVER_ID_MESA_KOSMICKRISP:
+			return "Apple Inc.";
+		case DRIVER_ID_SAMSUNG_PROPRIETARY:
+			return "Samsung";
+		default:
+			return NULL;
 	}
 }
 
@@ -977,21 +979,23 @@ static const char *GetDeviceVendorFromDeviceProperties (void)
 {
 	switch (vulkan_globals.device_properties.vendorID)
 	{
-	case 0x8086:
-		return "Intel";
-	case 0x10DE:
-		return "NVIDIA";
-	case 0x1002:
-		return "AMD";
-	case 0x1010:
-		return "ImgTec";
-	case 0x13B5:
-		return "ARM";
-	case 0x5143:
-		return "Qualcomm";
+		case 0x8086:
+			return "Intel";
+		case 0x10DE:
+			return "NVIDIA";
+		case 0x1002:
+			return "AMD";
+		case 0x1010:
+			return "ImgTec";
+		case 0x13B5:
+			return "ARM";
+		case 0x5143:
+			return "Qualcomm";
+		case 0x106b:
+			return "Apple Inc.";
+		default:
+			return NULL;
 	}
-
-	return NULL;
 }
 
 /*
