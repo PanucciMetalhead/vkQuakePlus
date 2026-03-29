@@ -6,7 +6,8 @@ project(
         'buildtype=release',
 #        'strip=false',
 #        'debug=true',
-        'optimization=3'
+        'optimization=3',
+        'b_lto=true'
     ]
 )
 
@@ -15,7 +16,12 @@ cc = meson.get_compiler('c')
 # Always build keeping frame pointers to get better backtraces
 add_project_arguments(['-fno-omit-frame-pointer'], language: 'c')
 
-add_project_link_arguments(['-fuse-ld=lld', '-flto'], language: 'c')
+# Use LLD only if the compiler and system support it.
+if cc.get_id() in ['clang', 'gcc']
+    if cc.has_link_argument('-fuse-ld=lld') and get_option('use_lld')
+        add_project_link_arguments('-fuse-ld=lld', language: 'c')
+    endif
+endif
 
 if cc.has_header_symbol('sched.h', 'CPU_ZERO', prefix: '#define _GNU_SOURCE')
     message('Info: Task affinity support enabled.')
