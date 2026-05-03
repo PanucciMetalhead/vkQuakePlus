@@ -169,7 +169,7 @@ void R_InitParticleIndexBuffer (void)
 
 	err = vkCreateBuffer (vulkan_globals.device, &buffer_create_info, NULL, &particle_index_buffer);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkCreateBuffer failed");
+		Sys_Error ("vkCreateBuffer failed with code %i", (int)err);
 
 	GL_SetObjectName ((uint64_t)particle_index_buffer, VK_OBJECT_TYPE_BUFFER, "Particle index buffer");
 
@@ -188,13 +188,13 @@ void R_InitParticleIndexBuffer (void)
 	Atomic_AddUInt64 (&total_device_vulkan_allocation_size, memory_requirements.size);
 	err = vkAllocateMemory (vulkan_globals.device, &memory_allocate_info, NULL, &particle_index_buffer_memory);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkAllocateMemory failed");
+		Sys_Error ("vkAllocateMemory failed with code %i", (int)err);
 
 	GL_SetObjectName ((uint64_t)particle_index_buffer_memory, VK_OBJECT_TYPE_DEVICE_MEMORY, "Particle index buffer");
 
 	err = vkBindBufferMemory (vulkan_globals.device, particle_index_buffer, particle_index_buffer_memory, 0);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkBindBufferMemory failed");
+		Sys_Error ("vkBindBufferMemory failed with code %i", (int)err);
 
 	VkBuffer		staging_buffer;
 	VkCommandBuffer cb_context;
@@ -1028,7 +1028,9 @@ R_DrawParticles -- johnfitz -- moved all non-drawing code to CL_RunParticles
 void R_DrawParticles (cb_context_t *cbx)
 {
 	R_BeginDebugUtilsLabel (cbx, "Particles");
-	R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.particle_pipeline);
+	R_BindPipeline (
+		cbx, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		(cbx->render_pass_index == RENDER_PASS_INDEX_WBOIT) ? vulkan_globals.particle_oit_pipeline : vulkan_globals.particle_pipeline);
 	vulkan_globals.vk_cmd_bind_descriptor_sets (
 		cbx->cb, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.basic_pipeline_layout.handle, 0, 1, &particletexture->descriptor_set, 0, NULL);
 
@@ -1044,9 +1046,9 @@ R_DrawParticles_ShowTris -- johnfitz
 void R_DrawParticles_ShowTris (cb_context_t *cbx)
 {
 	if (r_showtris.value == 1)
-		R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.showtris_pipeline);
+		R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.showtris_pipeline[R_MainPassPipelineVariant (cbx->render_pass_index)]);
 	else
-		R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.showtris_depth_test_pipeline);
+		R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.showtris_depth_test_pipeline[R_MainPassPipelineVariant (cbx->render_pass_index)]);
 
 	R_DrawParticlesFaces (cbx);
 }

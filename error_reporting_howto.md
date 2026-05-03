@@ -25,11 +25,11 @@ either alongside the `vkQuake` executable, or in a place where it can be found f
 ### Windows MSVC
 
 Error reporting is directly built-in in the game : Users can report screenshots of either `Host_Error` console errors
-or `QUAKE ERROR` dialogs. 
+or `Quake Error` dialogs. 
 
 ### Linux, MacOS, or Windows MSYS2 (x64 or ARM64)
 
-`Host_Error` and `QUAKE_ERROR` dialogs only report raw stack traces with minimal context,
+`Host_Error` and `Quake Error` dialogs only report raw stack traces with minimal context,
 often limited to function names in the best of cases. 
 In order to get file+line information Users will need to run some external tools.  
 

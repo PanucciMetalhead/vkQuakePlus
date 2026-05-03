@@ -106,7 +106,6 @@ VkAccelerationStructureKHR bmodel_tlas = VK_NULL_HANDLE;
 static VkBuffer			   bmodel_tlas_buffer;
 static size_t			   bmodel_tlas_size;
 static vulkan_memory_t	   bmodel_tlas_device_memory;
-VkDeviceAddress			   bmodel_tlas_device_address;
 static uint32_t			   bmodel_tlas_max_instances = TLAS_SIZE_MULTIPLE;
 static VkBuffer			   bmodel_indices_buffer;
 static VkDeviceAddress	   bmodel_indices_device_address;
@@ -149,7 +148,7 @@ void R_EnsureASScratchBufferSize (uint32_t required_size)
 
 	err = vkCreateBuffer (vulkan_globals.device, &buffer_create_info, NULL, &as_scratch_buffer.buffer);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkCreateBuffer failed");
+		Sys_Error ("vkCreateBuffer failed with code %i", (int)err);
 	GL_SetObjectName ((uint64_t)as_scratch_buffer.buffer, VK_OBJECT_TYPE_BUFFER, "AS scratch buffer");
 
 	VkMemoryRequirements memory_requirements;
@@ -170,7 +169,7 @@ void R_EnsureASScratchBufferSize (uint32_t required_size)
 
 	err = vkBindBufferMemory (vulkan_globals.device, as_scratch_buffer.buffer, as_scratch_memory.handle, 0);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkBindBufferMemory failed");
+		Sys_Error ("vkBindBufferMemory failed with code %i", (int)err);
 
 	ZEROED_STRUCT (VkBufferDeviceAddressInfoKHR, buffer_device_address_info);
 	buffer_device_address_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
@@ -226,7 +225,7 @@ static void R_AllocateTLAS (void)
 
 	err = vkCreateBuffer (vulkan_globals.device, &buffer_create_info, NULL, &bmodel_tlas_buffer);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkCreateBuffer failed");
+		Sys_Error ("vkCreateBuffer failed with code %i", (int)err);
 	GL_SetObjectName ((uint64_t)bmodel_tlas_buffer, VK_OBJECT_TYPE_BUFFER, "BModel TLAS");
 
 	VkMemoryRequirements memory_requirements;
@@ -247,7 +246,7 @@ static void R_AllocateTLAS (void)
 
 	err = vkBindBufferMemory (vulkan_globals.device, bmodel_tlas_buffer, bmodel_tlas_device_memory.handle, 0);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkBindBufferMemory failed");
+		Sys_Error ("vkBindBufferMemory failed with code %i", (int)err);
 
 	ZEROED_STRUCT (VkAccelerationStructureCreateInfoKHR, acceleration_structure_create_info);
 	acceleration_structure_create_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -256,12 +255,7 @@ static void R_AllocateTLAS (void)
 	acceleration_structure_create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 	err = vulkan_globals.vk_create_acceleration_structure (vulkan_globals.device, &acceleration_structure_create_info, NULL, &bmodel_tlas);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkCreateAccelerationStructure failed");
-
-	ZEROED_STRUCT (VkAccelerationStructureDeviceAddressInfoKHR, tlas_address_info);
-	tlas_address_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-	tlas_address_info.accelerationStructure = bmodel_tlas;
-	bmodel_tlas_device_address = vulkan_globals.vk_get_acceleration_structure_device_address (vulkan_globals.device, &tlas_address_info);
+		Sys_Error ("vkCreateAccelerationStructure failed with code %i", (int)err);
 }
 
 extern cvar_t r_showtris;
@@ -587,9 +581,10 @@ R_IndirectBrush
 qboolean R_IndirectBrush (entity_t *e)
 {
 	assert (e->model->type == mod_brush);
-	return indirect && !(e->origin[0] || e->origin[1] || e->origin[2] || e->angles[0] || e->angles[1] || e->angles[2] ||
-						 ENTSCALE_DECODE (e->netstate.scale) != 1.0f || ENTALPHA_DECODE (e->alpha) != 1.0f || e->frame != 0 || e->model->name[0] != '*' ||
-						 (WATER_FIXED_ORDER && brush_deps_data[e->model->combined_deps].water_count != 0));
+	const qboolean transparent_entity = ENTALPHA_DECODE (e->alpha) != 1.0f;
+	const qboolean alpha_sorted = !oit_active && (transparent_entity || (WATER_FIXED_ORDER && brush_deps_data[e->model->combined_deps].water_count != 0));
+	return indirect && !(transparent_entity || alpha_sorted || e->origin[0] || e->origin[1] || e->origin[2] || e->angles[0] || e->angles[1] || e->angles[2] ||
+						 ENTSCALE_DECODE (e->netstate.scale) != 1.0f || e->frame != 0 || e->model->name[0] != '*');
 }
 
 /*
@@ -611,7 +606,7 @@ void R_DrawBrushModel (cb_context_t *cbx, entity_t *e, int chain, int *brushpoly
 
 	clmodel = e->model;
 
-	if (R_IndirectBrush (e))
+	if (!water_opaque_only && !water_transparent_only && R_IndirectBrush (e))
 	{
 		// indirect mark
 		int				 start = clmodel->firstmodelsurface;
@@ -707,7 +702,8 @@ void R_DrawBrushModel (cb_context_t *cbx, entity_t *e, int chain, int *brushpoly
 			}
 		}
 
-	R_DrawTextureChains (cbx, clmodel, e, chain);
+	if (!water_transparent_only)
+		R_DrawTextureChains (cbx, clmodel, e, chain);
 	if (clmodel->used_specials & SURF_DRAWTURB)
 		R_DrawTextureChains_Water (cbx, clmodel, e, chain, water_opaque_only, water_transparent_only);
 	R_PushConstants (cbx, VK_SHADER_STAGE_ALL_GRAPHICS, 0, 16 * sizeof (float), vulkan_globals.view_projection_matrix);
@@ -760,9 +756,9 @@ void R_DrawBrushModel_ShowTris (cb_context_t *cbx, entity_t *e)
 	MatrixMultiply (mvp, model_matrix);
 
 	if (r_showtris.value == 1)
-		R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.showtris_pipeline);
+		R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.showtris_pipeline[R_MainPassPipelineVariant (cbx->render_pass_index)]);
 	else
-		R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.showtris_depth_test_pipeline);
+		R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.showtris_depth_test_pipeline[R_MainPassPipelineVariant (cbx->render_pass_index)]);
 	R_PushConstants (cbx, VK_SHADER_STAGE_ALL_GRAPHICS, 0, 16 * sizeof (float), mvp);
 
 	//
@@ -823,9 +819,9 @@ void R_DrawIndirectBrushes (cb_context_t *cbx, qboolean draw_water, qboolean tra
 
 		if (!draw_sky && !gl_texture)
 			continue;
-		if (draw_water != (texture->name[0] == '*' || texture->name[0] == '!')) // SURF_DRAWTURB is in surfaces only, but it's derived from the texture name
+		if (draw_water != TEXTYPE_ISLIQUID (texture->type))
 			continue;
-		if (draw_sky != (!q_strncasecmp (texture->name, "sky", 3))) // SURF_DRAWSKY is in surfaces only, but it's derived from the texture name
+		if (draw_sky != (texture->type == TEXTYPE_SKY))
 			continue;
 
 		if (!draw_sky && !r_lightmap_cheatsafe && lasttexture != gl_texture)
@@ -838,23 +834,7 @@ void R_DrawIndirectBrushes (cb_context_t *cbx, qboolean draw_water, qboolean tra
 		float alpha = 1.0f;
 		if (draw_water)
 		{
-			if (!q_strncasecmp (texture->name, "*lava", 5) || !q_strncasecmp (texture->name, "!lava", 5))
-			{
-				// SURF_DRAWLAVA is in surfaces only, but it's derived from the texture name
-				alpha = map_lavaalpha > 0 ? map_lavaalpha : map_fallbackalpha;
-			}
-			else if (!q_strncasecmp (texture->name, "*slime", 6) || !q_strncasecmp (texture->name, "!slime", 6))
-			{
-				// SURF_DRAWSLIME is in surfaces only, but it's derived from the texture name
-				alpha = map_slimealpha > 0 ? map_slimealpha : map_fallbackalpha;
-			}
-			else if (!q_strncasecmp (texture->name, "*tele", 5) || !q_strncasecmp (texture->name, "!tele", 5))
-			{
-				// SURF_DRAWTELE is in surfaces only, but it's derived from the texture name
-				alpha = map_telealpha > 0 ? map_telealpha : map_fallbackalpha;
-			}
-			else
-				alpha = map_wateralpha;
+			alpha = GL_WaterAlphaForTextureType (texture->type);
 
 			if ((alpha < 1.0f) != transparent_water)
 				continue;
@@ -881,11 +861,14 @@ void R_DrawIndirectBrushes (cb_context_t *cbx, qboolean draw_water, qboolean tra
 
 		if (!draw_sky)
 		{
-			const qboolean alpha_test = texture->name[0] == '{'; // SURF_DRAWFENCE is in surfaces only, but it's derived from the texture name
+			const qboolean alpha_test = texture->type == TEXTYPE_CUTOUT;
 			const qboolean alpha_blend = alpha < 1.0f;
 			int			   pipeline_index =
 				(fullbright_enabled ? 1 : 0) + (alpha_test ? 2 : 0) + (alpha_blend ? 4 : 0) + (vid_filter.value != 0 && vid_palettize.value != 0 ? 8 : 0);
-			R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_globals.world_pipelines[pipeline_index]);
+			vulkan_pipeline_t pipeline = cbx->render_pass_index == RENDER_PASS_INDEX_WBOIT
+											 ? vulkan_globals.world_wboit_pipelines[pipeline_index]
+											 : vulkan_globals.world_pipelines[R_MainPassPipelineVariant (cbx->render_pass_index)][pipeline_index];
+			R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
 			qboolean use_zbias = INDIRECT_ZBIAS && gl_zfix.value && indirect_draws[i].is_bmodel;
 			float	 constant_factor = 0.0f, slope_factor = 0.0f;
@@ -933,7 +916,8 @@ void R_DrawIndirectBrushes_ShowTris (cb_context_t *cbx)
 {
 	R_BindPipeline (
 		cbx, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		r_showtris.value == 1 ? vulkan_globals.showtris_indirect_pipeline : vulkan_globals.showtris_indirect_depth_test_pipeline);
+		r_showtris.value == 1 ? vulkan_globals.showtris_indirect_pipeline[R_MainPassPipelineVariant (cbx->render_pass_index)]
+							  : vulkan_globals.showtris_indirect_depth_test_pipeline[R_MainPassPipelineVariant (cbx->render_pass_index)]);
 
 	VkDeviceSize offset = 0;
 	vulkan_globals.vk_cmd_bind_vertex_buffers (cbx->cb, 0, 1, &bmodel_vertex_buffer, &offset);
@@ -1512,7 +1496,7 @@ static void GL_AllocateWorkgroupBoundsBuffers ()
 
 		err = vkCreateBuffer (vulkan_globals.device, &buffer_create_info, NULL, &lightmaps[i].workgroup_bounds_buffer);
 		if (err != VK_SUCCESS)
-			Sys_Error ("vkCreateBuffer failed");
+			Sys_Error ("vkCreateBuffer failed with code %i", (int)err);
 		GL_SetObjectName ((uint64_t)lightmaps[i].workgroup_bounds_buffer, VK_OBJECT_TYPE_BUFFER, "Workgroup bounds buffer");
 	}
 
@@ -1537,7 +1521,7 @@ static void GL_AllocateWorkgroupBoundsBuffers ()
 	{
 		err = vkBindBufferMemory (vulkan_globals.device, lightmaps[i].workgroup_bounds_buffer, workgroup_bounds_buffer_memory.handle, aligned_size * i);
 		if (err != VK_SUCCESS)
-			Sys_Error ("vkBindBufferMemory failed");
+			Sys_Error ("vkBindBufferMemory failed with code %i", (int)err);
 	}
 }
 
@@ -1575,7 +1559,7 @@ static void R_InitVisibilityBuffers (uint32_t size)
 	void	*data;
 	VkResult err = vkMapMemory (vulkan_globals.device, dyn_visibility_buffer_memory.handle, 0, size, 0, &data);
 	if (err != VK_SUCCESS)
-		Sys_Error ("vkMapMemory failed");
+		Sys_Error ("vkMapMemory failed with code %i", (int)err);
 
 	dyn_visibility_view = (unsigned char *)data;
 	dyn_visibility_offset = size / 2;
@@ -2200,7 +2184,6 @@ void GL_DeleteBModelAccelerationStructures (void)
 	bmodel_tlas = VK_NULL_HANDLE;
 	bmodel_tlas_buffer = VK_NULL_HANDLE;
 	bmodel_tlas_size = 0;
-	bmodel_tlas_device_address = 0;
 	bmodel_indices_buffer = VK_NULL_HANDLE;
 	bmodel_indices_device_address = 0;
 	TEMP_FREE (buffers);
@@ -2441,7 +2424,7 @@ void GL_BuildBModelAccelerationStructures (void)
 		acceleration_structure_create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
 		err = vulkan_globals.vk_create_acceleration_structure (vulkan_globals.device, &acceleration_structure_create_info, NULL, &blas_models[i]->blas);
 		if (err != VK_SUCCESS)
-			Sys_Error ("vkCreateAccelerationStructure failed");
+			Sys_Error ("vkCreateAccelerationStructure failed with code %i", (int)err);
 
 		ZEROED_STRUCT (VkAccelerationStructureBuildRangeInfoKHR, build_range_info);
 		build_range_info.primitiveCount = blas_num_tris[i];
@@ -3127,6 +3110,22 @@ void R_FlushUpdateLightmaps (
 	vkCmdPipelineBarrier (
 		cbx->cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, num_batch_lightmaps, pre_barriers);
 	R_BindPipeline (cbx, VK_PIPELINE_BIND_POINT_COMPUTE, *pipeline);
+	if (pipeline == &vulkan_globals.update_lightmap_rt_pipeline)
+	{
+		ZEROED_STRUCT (VkWriteDescriptorSetAccelerationStructureKHR, tlas_info);
+		tlas_info.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+		tlas_info.accelerationStructureCount = 1;
+		tlas_info.pAccelerationStructures = &bmodel_tlas;
+
+		ZEROED_STRUCT (VkWriteDescriptorSet, tlas_write);
+		tlas_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		tlas_write.pNext = &tlas_info;
+		tlas_write.dstBinding = 0;
+		tlas_write.descriptorCount = 1;
+		tlas_write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+
+		vulkan_globals.vk_cmd_push_descriptor_set (cbx->cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->layout.handle, 1, 1, &tlas_write);
+	}
 	uint32_t offsets[2] = {
 		current_compute_buffer_index * MAX_LIGHTSTYLES * sizeof (float), current_compute_buffer_index * MAX_DLIGHTS * 2 * sizeof (lm_compute_light_t)};
 	for (int j = 0; j < num_batch_lightmaps; ++j)
@@ -3163,14 +3162,13 @@ void R_FlushUpdateLightmaps (
 							lightmap_regions[j][y + h][i] = false;
 						h += 1;
 					}
-					uint32_t push_constants[9] = {current_dlights, LMBLOCK_WIDTH, x * LM_CULL_BLOCK_W / 8, y * LM_CULL_BLOCK_H / 8, type == 1, cached_dlights};
+					uint32_t push_constants[7] = {current_dlights, LMBLOCK_WIDTH, x * LM_CULL_BLOCK_W / 8, y * LM_CULL_BLOCK_H / 8, type == 1, cached_dlights};
 					int		 push_size = 6 * sizeof (uint32_t);
 					if (pipeline == &vulkan_globals.update_lightmap_rt_pipeline)
 					{
 						uint32_t shadow_samples = 1 << ((int)r_rtshadows.value + 1);
-						memcpy (&push_constants[6], &bmodel_tlas_device_address, sizeof (VkDeviceAddress));
-						push_constants[8] = shadow_samples;
-						push_size = 9 * sizeof (uint32_t);
+						push_constants[6] = shadow_samples;
+						push_size = 7 * sizeof (uint32_t);
 					}
 					R_PushConstants (cbx, VK_SHADER_STAGE_COMPUTE_BIT, 0, push_size, push_constants);
 					w = q_min (lightmaps[lightmap_indexes[j]].lightstyle_rectused[0].w / 8 - x * LM_CULL_BLOCK_W / 8, w * LM_CULL_BLOCK_W / 8);
