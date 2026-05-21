@@ -32,6 +32,7 @@ mplane_t frustum[4];
 
 qboolean render_warp;
 int		 render_scale;
+qboolean render_panini; // build fails at linking stage if this declaration is missing
 
 // johnfitz -- rendering statistics
 atomic_uint32_t rs_brushpolys, rs_aliaspolys, rs_skypolys, rs_particles, rs_fogpolys;
@@ -123,6 +124,8 @@ extern qboolean indirect_ready;
 extern SDL_Mutex *draw_qcvm_mutex;
 
 static atomic_uint32_t next_visedict;
+
+cvar_t r_panini = {"r_panini", "0", CVAR_ARCHIVE}; // 0 = off, anything higher is the strength of the distortion
 
 /*
 =================
@@ -405,6 +408,15 @@ static void R_SetupViewBeforeMark (void *unused)
 		}
 	}
 	// johnfitz
+
+	// Reset our flag to false at the start of every frame calculation
+	render_panini = false;
+
+	// If the player turned on r_panini, flip our flag to true!
+	if (r_panini.value > 0.0f)
+	{
+		render_panini = true;
+	}
 
 	R_SetFrustum (r_fovx, r_fovy); // johnfitz -- use r_fov* vars
 	R_SetupMatrices ();

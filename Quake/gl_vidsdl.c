@@ -3146,6 +3146,7 @@ typedef struct screen_effect_constants_s
 	float	 poly_blend_g;
 	float	 poly_blend_b;
 	float	 poly_blend_a;
+	float	 fov_x; // for Panini projection
 } screen_effect_constants_t;
 
 typedef struct ray_debug_constants_s
@@ -3177,6 +3178,7 @@ typedef struct end_rendering_parms_s
 	qboolean	 polyblend	   : 1;
 	qboolean	 menu		   : 1;
 	qboolean	 ray_debug	   : 1;
+	qboolean	 render_panini : 1;
 	uint32_t	 render_scale  : 3;
 	uint32_t	 vid_height	   : 20;
 	float		 time;
@@ -3195,6 +3197,7 @@ typedef struct end_rendering_parms_s
 #define SCREEN_EFFECT_FLAG_WATER_WARP 0x4
 #define SCREEN_EFFECT_FLAG_PALETTIZE  0x8
 #define SCREEN_EFFECT_FLAG_MENU		  0x10
+#define SCREEN_EFFECT_FLAG_PANINI     0x20
 
 /*
 ===============
@@ -3272,6 +3275,8 @@ static void GL_ScreenEffects (cb_context_t *cbx, qboolean enabled, end_rendering
 			uint32_t screen_effect_flags = 0;
 			if (parms->render_warp)
 				screen_effect_flags |= SCREEN_EFFECT_FLAG_WATER_WARP;
+			if (parms->render_panini)
+				screen_effect_flags |= SCREEN_EFFECT_FLAG_PANINI;
 			if (parms->render_scale >= 8)
 				screen_effect_flags |= SCREEN_EFFECT_FLAG_SCALE_8X;
 			else if (parms->render_scale >= 4)
@@ -3295,6 +3300,7 @@ static void GL_ScreenEffects (cb_context_t *cbx, qboolean enabled, end_rendering
 				(float)parms->v_blend[1] / 255.0f,
 				(float)parms->v_blend[2] / 255.0f,
 				(float)parms->v_blend[3] / 255.0f,
+				r_refdef.fov_x // for Panini projection
 			};
 			R_PushConstants (cbx, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof (push_constants), &push_constants);
 		}
@@ -3540,7 +3546,7 @@ static void GL_EndRenderingTask (end_rendering_parms_t *parms)
 	depth_clear_value.depthStencil.stencil = 0;
 
 	const qboolean screen_effects =
-		parms->render_warp || (parms->render_scale >= 2) || parms->vid_palettize || (parms->polyblend && parms->v_blend[3]) || parms->menu || parms->ray_debug;
+		parms->render_warp || parms->render_panini || (parms->render_scale >= 2) || parms->vid_palettize || (parms->polyblend && parms->v_blend[3]) || parms->menu || parms->ray_debug;
 	{
 		const qboolean resolve = (vulkan_globals.sample_count != VK_SAMPLE_COUNT_1_BIT);
 		const qboolean use_oit = parms->use_oit;
@@ -3708,6 +3714,7 @@ task_handle_t GL_EndRendering (qboolean use_tasks, qboolean swapchain)
 		.swapchain = swapchain,
 		.use_oit = oit_active,
 		.render_warp = render_warp,
+		.render_panini = render_panini,
 		.vid_palettize = vid_palettize.value != 0,
 		.polyblend = gl_polyblend.value != 0,
 		.menu = key_dest == key_menu,

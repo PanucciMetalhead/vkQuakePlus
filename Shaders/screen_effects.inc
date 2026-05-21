@@ -12,7 +12,7 @@ layout (set = 0, binding = 1) uniform sampler2D blue_noise_tex;
 layout (set = 0, binding = 3) uniform samplerBuffer palette_colors;
 layout (set = 0, binding = 4) uniform PaletteOctree
 {
-	OctreeNode nodes[NUM_PALETTE_OCTREE_NODES];
+	struct OctreeNode nodes[NUM_PALETTE_OCTREE_NODES];
 }
 palette_octree;
 
@@ -27,6 +27,7 @@ layout (push_constant) uniform PushConsts
 	float poly_blend_g;
 	float poly_blend_b;
 	float poly_blend_a;
+	float fov_x;
 }
 push_constants;
 
@@ -64,6 +65,7 @@ float blue_noise (ivec2 u)
 #define SCREEN_EFFECT_FLAG_WATER_WARP 0x4
 #define SCREEN_EFFECT_FLAG_PALETTIZE  0x8
 #define SCREEN_EFFECT_FLAG_MENU		  0x10
+#define SCREEN_EFFECT_FLAG_PANINI	  0x20
 
 #if defined(SCALING)
 // Vulkan guarantees 16384 bytes of shared memory, so host doesn't need to check
@@ -129,23 +131,83 @@ void main ()
 
 	vec4 color = vec4 (0.0f, 0.0f, 0.0f, 0.0f);
 
-	[[branch]] if ((push_constants.flags & SCREEN_EFFECT_FLAG_WATER_WARP) != 0)
-	{
-		const float cycle_x = 3.14159f * 5.0f;
-		const float cycle_y = cycle_x * push_constants.aspect_ratio;
-		const float amp_x = 1.0f / 300.0f;
-		const float amp_y = amp_x * push_constants.aspect_ratio;
+	bool is_warp = ((push_constants.flags & SCREEN_EFFECT_FLAG_WATER_WARP) != 0);
+    bool is_panini = ((push_constants.flags & SCREEN_EFFECT_FLAG_PANINI) != 0);
 
-		const float pos_x_norm = float (pos_x) * push_constants.screen_size_rcp.x;
-		const float pos_y_norm = float (pos_y) * push_constants.screen_size_rcp.y;
+    [[branch]] if (is_warp || is_panini)
+    {
+        // 1. Base normalized coordinates [0, 1]
+        float pos_x_norm = float(pos_x) * push_constants.screen_size_rcp.x;
+        float pos_y_norm = float(pos_y) * push_constants.screen_size_rcp.y;
 
-		const float tex_x = (pos_x_norm + (sin (pos_y_norm * cycle_x + push_constants.time) * amp_x)) * (1.0f - amp_x * 2.0f) + amp_x;
-		const float tex_y = (pos_y_norm + (sin (pos_x_norm * cycle_y + push_constants.time) * amp_y)) * (1.0f - amp_y * 2.0f) + amp_y;
+        float tex_x = pos_x_norm;
+        float tex_y = pos_y_norm;
 
-		color = texture (input_tex, vec2 (tex_x, tex_y));
-	}
-	else
-		color = texelFetch (input_tex, ivec2 (min (push_constants.clamp_size.x, pos_x), min (push_constants.clamp_size.y, pos_y)), 0);
+        // 2. Apply Panini un-stretching first
+        if (is_panini)
+        {
+            vec2 uv = vec2(pos_x_norm * 2.0f - 1.0f, pos_y_norm * 2.0f - 1.0f);
+
+            float fov_rad = radians(min(push_constants.fov_x, 179.0f));
+            float theta_max = fov_rad * 0.5f;
+            float pan_max = 2.0f * tan(theta_max * 0.5f);
+
+            float S = uv.x * pan_max;
+            float theta = 2.0f * atan(S * 0.5f);
+            float cos_theta = cos(theta);
+
+            float p_sample_x = tan(theta) / tan(theta_max);
+            float Y_ray = uv.y * (cos_theta + 1.0f) * 0.5f;
+            float p_sample_y = (Y_ray / cos_theta) * ((2.0f * cos(theta_max)) / (cos(theta_max) + 1.0f));
+
+            tex_x = p_sample_x * 0.5f + 0.5f;
+            tex_y = p_sample_y * 0.5f + 0.5f;
+        }
+
+        // 3. Apply Water Warp sine waves on top
+    	if (is_warp)
+    	{
+    		const float cycle_x = 3.14159f * 5.0f;
+    		const float cycle_y = cycle_x * push_constants.aspect_ratio;
+
+    		// Base amplitude from original engine
+    		float amp_x = 1.0f / 300.0f;
+
+    		// If Panini is active, it digitally zooms the center of the screen.
+    		// We reduce the wave amplitude here to counteract that zoom.
+    		if (is_panini) {
+    			amp_x *= 0.4f; // Cuts the warp intensity by 60%
+    		}
+
+    		float amp_y = amp_x * push_constants.aspect_ratio;
+
+    		tex_x = (tex_x + (sin (pos_y_norm * cycle_x + push_constants.time) * amp_x)) * (1.0f - amp_x * 2.0f) + amp_x;
+    		tex_y = (tex_y + (sin (pos_x_norm * cycle_y + push_constants.time) * amp_y)) * (1.0f - amp_y * 2.0f) + amp_y;
+    	}
+
+        // 4. Sample the final pixel
+        if (is_panini && !is_warp)
+        {
+            // Crisp nearest-neighbor for pure Panini (fixes the blur)
+            uint fetch_x = uint(tex_x * float(push_constants.clamp_size.x));
+            uint fetch_y = uint(tex_y * float(push_constants.clamp_size.y));
+            color = texelFetch(
+                input_tex,
+                ivec2(min(push_constants.clamp_size.x, fetch_x), min(push_constants.clamp_size.y, fetch_y)),
+                0
+            );
+        }
+        else
+        {
+            // Bilinear filtering for Water Warp (keeps the sine waves smooth)
+            color = texture(input_tex, vec2(tex_x, tex_y));
+        }
+    }
+    else
+    {
+        // No effects active
+        color = texelFetch (input_tex, ivec2 (min (push_constants.clamp_size.x, pos_x), min (push_constants.clamp_size.y, pos_y)), 0);
+    }
 
 	[[branch]] if ((push_constants.flags & SCREEN_EFFECT_FLAG_PALETTIZE) != 0)
 	{

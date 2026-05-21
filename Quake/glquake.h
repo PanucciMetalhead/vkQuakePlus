@@ -444,6 +444,7 @@ extern int		r_visframecount; // ??? what difs?
 extern int		r_framecount;
 extern mplane_t frustum[4];
 extern qboolean render_warp;
+extern qboolean render_panini;
 extern qboolean in_update_screen;
 extern qboolean use_simd;
 extern int		render_scale;
