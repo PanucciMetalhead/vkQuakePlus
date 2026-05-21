@@ -12,7 +12,7 @@ layout (set = 0, binding = 1) uniform sampler2D blue_noise_tex;
 layout (set = 0, binding = 3) uniform samplerBuffer palette_colors;
 layout (set = 0, binding = 4) uniform PaletteOctree
 {
-	struct OctreeNode nodes[NUM_PALETTE_OCTREE_NODES];
+	OctreeNode nodes[NUM_PALETTE_OCTREE_NODES];
 }
 palette_octree;
 
