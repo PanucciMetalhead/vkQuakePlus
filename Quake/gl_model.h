@@ -595,9 +595,10 @@ struct glheapnode_s;
 typedef struct qmodel_s
 {
 	char		 name[MAX_QPATH];
-	unsigned int path_id;  // path id of the game directory
-						   // that this model came from
-	qboolean	 needload; // bmodels and sprites don't cache normally
+	qboolean	 is_worldmodel; // only true for a map
+	unsigned int path_id;		// path id of the game directory
+								// that this model came from
+	qboolean	 needload;		// bmodels and sprites don't cache normally
 
 	modtype_t  type;
 	int		   numframes;
