@@ -1,6 +1,6 @@
 # vkQuakePlus extra features
 
-* Speedometer
+* Speedometer ([@andre-budko](https://github.com/andrey-budko)'s [implementation](https://github.com/andrey-budko/vkQuake/commit/45245cf4a904735aed00f5ea777a0e7a9b1979b6))
 * Panini projection (experimental)
 
 ___
