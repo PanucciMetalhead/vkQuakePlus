@@ -780,10 +780,8 @@ static void GL_InitInstance (void)
 			 * VK_KHR_portability_enumeration instance extension.
 			 * -----------------------------
 			 */
-#ifdef __APPLE__
 			if (strcmp (VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, extension_props[i].extensionName) == 0)
 				vulkan_globals.enable_portability_extensions = true;
-#endif
 
 #if _DEBUG
 			if (strcmp (VK_EXT_DEBUG_UTILS_EXTENSION_NAME, extension_props[i].extensionName) == 0)
@@ -826,13 +824,11 @@ static void GL_InitInstance (void)
 	if (vulkan_globals.get_physical_device_properties_2)
 		instance_extensions[sdl_extension_count + additionalExtensionCount++] = VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME;
 	// Panucci 2026-02-24
-#ifdef __APPLE__
 	if (vulkan_globals.enable_portability_extensions)
 	{
 		instance_extensions[sdl_extension_count + additionalExtensionCount++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
 		instance_create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 	}
-#endif
 
 #ifdef _DEBUG
 	if (vulkan_globals.debug_utils)
